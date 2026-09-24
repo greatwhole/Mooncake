@@ -221,6 +221,15 @@ static int selectPeerDevice(RdmaTransport::SegmentDesc *peer_segment_desc,
                    << " devices=" << peer_segment_desc->devices.size();
         return ERR_ADDRESS_NOT_REGISTERED;
     }
+    if (config.enable_dest_device_affinity &&
+        peer_segment_desc->devices[device_id].name != local_hca) {
+        LOG_FIRST_N(WARNING, 4)
+            << "[RDMA] Destination device affinity fallback: peer_segment="
+            << peer_segment_desc->name << ", requested_device=" << local_hca
+            << ", selected_peer_device="
+            << peer_segment_desc->devices[device_id].name
+            << ", retry_count=" << retry_count;
+    }
     return 0;
 }
 
