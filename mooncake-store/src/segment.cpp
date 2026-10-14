@@ -427,7 +427,9 @@ ErrorCode ScopedSegmentAccess::PrepareUnmountSegment(
     }
     if (it->second.status == SegmentStatus::UNMOUNTING) {
         LOG(ERROR) << "segment_id=" << segment_id
-                   << ", error=segment_is_unmounting";
+                   << ", segment_name=" << it->second.segment.name
+                   << ", operation=prepare_unmount, segment_status="
+                   << it->second.status << ", error=segment_is_unmounting";
         return ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS;
     }
 

@@ -1510,7 +1510,7 @@ int main(int argc, char* argv[]) {
     }
 
     LOG(INFO)
-        << "Master service started on port " << master_config.rpc_port
+        << "Master service starting on port " << master_config.rpc_port
         << ", max_threads=" << master_config.rpc_thread_num
         << ", enable_metric_reporting=" << master_config.metrics.enabled
         << ", metrics_port=" << master_config.metrics.port
@@ -1659,10 +1659,33 @@ int main(int argc, char* argv[]) {
 
         int server_result = 0;
         std::atomic<bool> server_done{false};
-        std::thread server_thread([&server, &server_result, &server_done]() {
-            server_result = server.start();
-            server_done.store(true);
-        });
+        std::thread server_thread(
+            [&server, &server_result, &server_done, &master_config]() {
+                const auto result = server.start();
+                // Cancellation can also indicate an invalid acceptor
+                // descriptor. A signal may stop this single-start server before
+                // start() runs, in which case YLT returns server_has_ran
+                // instead of cancellation.
+                const bool unexpected_stop =
+                    !shutdown_requested.load() ||
+                    (result && result != coro_rpc::errc::operation_canceled &&
+                     result != coro_rpc::errc::server_has_ran);
+                if (unexpected_stop) {
+                    LOG(ERROR) << "Master RPC server exited unexpectedly: host="
+                               << master_config.rpc_address
+                               << ", port=" << master_config.rpc_port
+                               << ", rpc_error_code=" << result.val()
+                               << ", reason=" << result.message();
+                } else {
+                    LOG(INFO) << "Master RPC server stopped: host="
+                              << master_config.rpc_address
+                              << ", port=" << master_config.rpc_port
+                              << ", rpc_error_code=" << result.val()
+                              << ", reason=" << result.message();
+                }
+                server_result = result;
+                server_done.store(true);
+            });
 
         while (!shutdown_requested.load() && !server_done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));

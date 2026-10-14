@@ -163,5 +163,24 @@ int main(int argc, char *argv[]) {
     LOG(INFO) << "Starting real client service on " << rpc_bind_host << ":"
               << FLAGS_port;
 
-    return server.start();
+    const auto result = server.start();
+    if (result && result != coro_rpc::errc::operation_canceled) {
+        // Report the RPC failure before client teardown can obscure its cause.
+        LOG(ERROR) << "Client RPC server exited with error: host="
+                   << rpc_bind_host << ", port=" << FLAGS_port
+                   << ", rpc_error_code=" << result.val()
+                   << ", reason=" << result.message();
+    } else if (result == coro_rpc::errc::operation_canceled) {
+        // Cancellation alone does not prove an intentional shutdown.
+        LOG(WARNING) << "Client RPC server canceled: host=" << rpc_bind_host
+                     << ", port=" << FLAGS_port
+                     << ", rpc_error_code=" << result.val()
+                     << ", reason=" << result.message();
+    } else {
+        LOG(INFO) << "Client RPC server stopped: host=" << rpc_bind_host
+                  << ", port=" << FLAGS_port
+                  << ", rpc_error_code=" << result.val()
+                  << ", reason=" << result.message();
+    }
+    return result;
 }

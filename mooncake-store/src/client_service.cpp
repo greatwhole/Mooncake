@@ -533,7 +533,11 @@ Client::~Client() {
             UnmountSegment(reinterpret_cast<void*>(segment.base), segment.size);
         if (!result) {
             LOG(ERROR) << "Failed to unmount segment in destructor: "
-                       << toString(result.error());
+                       << toString(result.error())
+                       << ", phase=destructor_cleanup"
+                       << ", client_id=" << client_id_
+                       << ", segment_id=" << segment.id
+                       << ", segment_name=" << segment.name;
         }
     }
 
@@ -3826,8 +3830,10 @@ tl::expected<void, ErrorCode> Client::UnmountSegmentImpl(
     auto unmount_result = master_client_.UnmountSegment(it->second.id);
     if (!unmount_result) {
         ErrorCode err = unmount_result.error();
-        LOG(ERROR) << "Failed to unmount segment from master: "
-                   << toString(err);
+        LOG(ERROR) << "Failed to unmount segment from master: " << toString(err)
+                   << ", phase=master_unmount, client_id=" << client_id_
+                   << ", segment_id=" << it->second.id
+                   << ", segment_name=" << it->second.name;
         return tl::unexpected(err);
     }
 

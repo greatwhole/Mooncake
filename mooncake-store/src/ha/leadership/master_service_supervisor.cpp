@@ -550,8 +550,21 @@ int RunSupervisorLoop(const HABackendSpec& spec,
             continue;
         }
         if (ec->hasResult()) {
-            LOG(ERROR) << "Failed to start master service: "
-                       << ec->result().value();
+            const auto server_err = ec->result().value();
+            const bool unexpected_stop =
+                serving_state.IsActive() ||
+                (server_err &&
+                 server_err != coro_rpc::errc::operation_canceled);
+            LOG_IF(ERROR, unexpected_stop)
+                << "Master RPC server stopped before readiness: host="
+                << config.rpc_address << ", port=" << config.rpc_port
+                << ", rpc_error_code=" << server_err.val()
+                << ", reason=" << server_err.message();
+            LOG_IF(INFO, !unexpected_stop)
+                << "Master RPC server startup canceled: host="
+                << config.rpc_address << ", port=" << config.rpc_port
+                << ", rpc_error_code=" << server_err.val()
+                << ", reason=" << server_err.message();
             StopLeadershipMonitor(leadership_monitor_handle);
             DeactivateServingState(admin_server, label_reconciler);
             EnterStandbyMode(admin_server, *standby_controller,
@@ -590,8 +603,18 @@ int RunSupervisorLoop(const HABackendSpec& spec,
                        << toString(publish_ready_err);
             StopLeadershipMonitor(leadership_monitor_handle);
             auto server_err = std::move(ec.value()).get();
-            LOG(ERROR) << "Master service stopped after readiness failure: "
-                       << server_err;
+            const bool rpc_failed =
+                server_err && server_err != coro_rpc::errc::operation_canceled;
+            LOG_IF(ERROR, rpc_failed)
+                << "Master RPC server failed after readiness failure: host="
+                << config.rpc_address << ", port=" << config.rpc_port
+                << ", rpc_error_code=" << server_err.val()
+                << ", reason=" << server_err.message();
+            LOG_IF(INFO, !rpc_failed)
+                << "Master RPC server stopped after readiness failure: host="
+                << config.rpc_address << ", port=" << config.rpc_port
+                << ", rpc_error_code=" << server_err.val()
+                << ", reason=" << server_err.message();
             EnterStandbyMode(admin_server, *standby_controller,
                              accept_standby_runtime_updates,
                              leadership_session->view);
@@ -605,7 +628,21 @@ int RunSupervisorLoop(const HABackendSpec& spec,
         }
 
         auto server_err = std::move(ec.value()).get();
-        LOG(ERROR) << "Master service stopped: " << server_err;
+        // A requested stop may cancel accept(), but a distinct RPC failure
+        // must remain visible even if leadership was lost concurrently.
+        const bool unexpected_stop =
+            serving_state.IsActive() ||
+            (server_err && server_err != coro_rpc::errc::operation_canceled);
+        LOG_IF(ERROR, unexpected_stop)
+            << "Master RPC server exited unexpectedly: host="
+            << config.rpc_address << ", port=" << config.rpc_port
+            << ", rpc_error_code=" << server_err.val()
+            << ", reason=" << server_err.message();
+        LOG_IF(INFO, !unexpected_stop)
+            << "Master RPC server stopped: host=" << config.rpc_address
+            << ", port=" << config.rpc_port
+            << ", rpc_error_code=" << server_err.val()
+            << ", reason=" << server_err.message();
 
         StopLeadershipMonitor(leadership_monitor_handle);
         wrapped_master_service->StopBatchOpLogWriter();
