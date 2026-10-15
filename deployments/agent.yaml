@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kvcache-agent
+  namespace: aiservice
+  labels:
+    app: kvcache-agent
+    app.kubernetes.io/version: "0.3.13.post1"
+    mc_cluster_id: "yuxin_0.3.13"
+spec:
+  replicas: 3
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: kvcache-agent
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: kvcache-agent
+        app.kubernetes.io/version: "0.3.13.post1"
+        mc_cluster_id: "yuxin_0.3.13"
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 180
+      # Run the Agent only on the maas-h20 pool.  The former dx H200 pool uses
+      # a different HPC selector and is not a valid placement target here.
+      nodeSelector:
+        node.tke.cloud.tencent.com/hpc-cluster-id: hpc-mrie1zpk
+      affinity:
+        # node25 has only about 294Gi of live free memory after excluding the
+        # previous Agent working set.  Keep the 320Gi profile on the five H20
+        # nodes that have more than 900Gi available in the preflight snapshot.
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - maas-h20-node1
+                - maas-h20-node3
+                - maas-h20-node6
+                - maas-h20-node8
+                - maas-h20-node9
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: kvcache-agent
+            topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: hpc-id
+        operator: Equal
+        value: hpc-mrie1zpk
+        effect: NoSchedule
+      - key: node-gputype
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: kvcache-agent
+        image: artifacts.iflytek.com/docker-private/aipaas/mooncake-gpu-runtime:tag-v0.3.13.post1-cuda13.0.1-py312-beta.1@sha256:3add846b5a69d15644fc5905c04ffa91e07bc538bd60c18d033bc32663281108
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MOONCAKE_ROLE
+          value: client
+        # These are the three current host-network endpoints of StatefulSet/etcd.
+        - name: MC_METADATA_SERVER
+          value: etcd://10.246.42.251:2379,10.246.41.84:2379,10.246.44.47:2379
+        - name: MC_MASTER_SERVER_ADDRESS
+          value: etcd://10.246.42.251:2379,10.246.41.84:2379,10.246.44.47:2379
+        - name: MC_ETCD_ENDPOINTS
+          value: 10.246.42.251:2379,10.246.41.84:2379,10.246.44.47:2379
+        - name: MC_ENABLE_HA
+          value: "true"
+        - name: MC_GLOBAL_SEGMENT_SIZE
+          # A 300GB segment leaves roughly 41Gi headroom in the 320Gi cgroup.
+          value: 300GB
+        - name: MC_PROTOCOL
+          value: rdma
+        - name: MC_DEVICE_NAMES
+          value: mlx5_bond_0,mlx5_bond_1
+        - name: MC_STORE_CLUSTER_ID
+          value: yuxin_0.3.13
+        - name: MC_METADATA_CLUSTER_ID
+          value: yuxin_0.3.13
+        - name: MC_CLIENT_PORT
+          value: "60052"
+        - name: MC_LOG_DIR
+          value: /mclog
+        - name: MC_GLOG_MINLOGLEVEL
+          value: "0"
+        - name: MC_GLOG_ALSOLOGTOSTDERR
+          value: "true"
+        - name: MC_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        ports:
+        - name: client
+          containerPort: 60052
+          protocol: TCP
+        - name: metrics
+          containerPort: 9300
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "32"
+            memory: 320Gi
+          limits:
+            cpu: "32"
+            memory: 320Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: localtime
+          mountPath: /etc/localtime
+          readOnly: true
+        - name: hosts
+          mountPath: /etc/hosts
+        - name: mclog
+          mountPath: /mclog
+      volumes:
+      - name: localtime
+        hostPath:
+          path: /etc/localtime
+          type: File
+      - name: hosts
+        hostPath:
+          path: /etc/hosts
+          type: File
+      - name: mclog
+        hostPath:
+          path: /data1/logs/mclog
+          type: DirectoryOrCreate
